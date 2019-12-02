@@ -18,6 +18,7 @@ import com.github.binarywang.wxpay.constant.WxPayConstants.SignType;
 import com.github.binarywang.wxpay.constant.WxPayConstants.TradeType;
 import com.github.binarywang.wxpay.exception.WxPayException;
 import com.github.binarywang.wxpay.service.EntPayService;
+import com.github.binarywang.wxpay.service.ProfitSharingService;
 import com.github.binarywang.wxpay.service.WxPayService;
 import com.github.binarywang.wxpay.util.SignUtils;
 import com.google.common.base.Joiner;
@@ -47,7 +48,6 @@ import static com.github.binarywang.wxpay.constant.WxPayConstants.TarType;
  * @author <a href="https://github.com/binarywang">Binary Wang</a>
  */
 public abstract class BaseWxPayServiceImpl implements WxPayService {
-  private static final String PAY_BASE_URL = "https://api.mch.weixin.qq.com";
   private static final String TOTAL_FUND_COUNT = "资金流水总笔数";
 
   /**
@@ -60,7 +60,7 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
   static ThreadLocal<WxPayApiData> wxApiData = new ThreadLocal<>();
 
   private EntPayService entPayService = new EntPayServiceImpl(this);
-
+  private ProfitSharingService profitSharingService = new ProfitSharingServiceImpl(this);
   /**
    * The Config.
    */
@@ -69,6 +69,11 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
   @Override
   public EntPayService getEntPayService() {
     return entPayService;
+  }
+
+  @Override
+  public ProfitSharingService getProfitSharingService() {
+    return profitSharingService;
   }
 
   @Override
@@ -89,10 +94,10 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
   @Override
   public String getPayBaseUrl() {
     if (this.getConfig().isUseSandboxEnv()) {
-      return PAY_BASE_URL + "/sandboxnew";
+      return this.getConfig().getPayBaseUrl() + "/sandboxnew";
     }
 
-    return PAY_BASE_URL;
+    return this.getConfig().getPayBaseUrl();
   }
 
   @Override
@@ -101,7 +106,7 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
 
     String url = this.getPayBaseUrl() + "/secapi/pay/refund";
     if (this.getConfig().isUseSandboxEnv()) {
-      url = PAY_BASE_URL + "/sandboxnew/pay/refund";
+      url = this.getConfig().getPayBaseUrl() + "/sandboxnew/pay/refund";
     }
 
     String responseContent = this.post(url, request.toXML(), true);
@@ -143,11 +148,9 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
       result.checkResult(this, this.getConfig().getSignType(), false);
       return result;
     } catch (WxPayException e) {
-      log.error(e.getMessage(), e);
       throw e;
     } catch (Exception e) {
-      log.error(e.getMessage(), e);
-      throw new WxPayException("发生异常，" + e.getMessage(), e);
+      throw new WxPayException("发生异常！", e);
     }
   }
 
@@ -159,7 +162,6 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
       log.debug("微信支付退款异步通知解析后的对象：{}", result);
       return result;
     } catch (Exception e) {
-      log.error(e.getMessage(), e);
       throw new WxPayException("发生异常，" + e.getMessage(), e);
     }
   }
@@ -173,10 +175,8 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
       result.checkResult(this, this.getConfig().getSignType(), false);
       return result;
     } catch (WxPayException e) {
-      log.error(e.getMessage(), e);
       throw e;
     } catch (Exception e) {
-      log.error(e.getMessage(), e);
       throw new WxPayException("发生异常，" + e.getMessage(), e);
     }
 
@@ -514,7 +514,7 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
     return WxPayBillResult.fromRawBillResultString(responseContent, billType);
   }
 
-  private String handleGzipBill(String url, String requestStr) {
+  private String handleGzipBill(String url, String requestStr) throws WxPayException {
     try {
       byte[] responseBytes = this.postForBytes(url, requestStr, false);
       Path tempDirectory = Files.createTempDirectory("bill");
@@ -528,14 +528,12 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
           throw WxPayException.from(BaseWxPayResult.fromXML(new String(responseBytes, StandardCharsets.UTF_8),
             WxPayCommonResult.class));
         } else {
-          this.log.error("解压zip文件出错", e);
+          throw new WxPayException("解压zip文件出错！", e);
         }
       }
     } catch (Exception e) {
-      this.log.error("解析对账单文件时出错", e);
+      throw new WxPayException("解析对账单文件时出错！", e);
     }
-
-    return null;
   }
 
   @Override
@@ -583,15 +581,13 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
           throw WxPayException.from(BaseWxPayResult.fromXML(new String(responseBytes, StandardCharsets.UTF_8),
             WxPayCommonResult.class));
         } else {
-          this.log.error("解压zip文件出错", e);
-          throw new WxPayException("解压zip文件出错");
+          throw new WxPayException("解压zip文件出错", e);
         }
       }
     } catch (WxPayException wxPayException) {
       throw wxPayException;
     } catch (Exception e) {
-      this.log.error("解析对账单文件时出错", e);
-      throw new WxPayException("解压zip文件出错");
+      throw new WxPayException("解压zip文件出错", e);
     }
   }
 
@@ -780,8 +776,8 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
 
   @Override
   public String queryComment(WxPayQueryCommentRequest request) throws WxPayException {
+    request.setSignType(SignType.HMAC_SHA256);// 签名类型，目前仅支持HMAC-SHA256，默认就是HMAC-SHA256
     request.checkAndSign(this.getConfig());
-    request.setSignType(SignType.HMAC_SHA256);
 
     String url = this.getPayBaseUrl() + "/billcommentsp/batchquerycomment";
     String responseContent = this.post(url, request.toXML(), true);
@@ -790,6 +786,27 @@ public abstract class BaseWxPayServiceImpl implements WxPayService {
     }
 
     return responseContent;
+  }
+
+  @Override
+  public WxPayFaceAuthInfoResult getWxPayFaceAuthInfo(WxPayFaceAuthInfoRequest request) throws WxPayException {
+    request.checkAndSign(this.getConfig());
+    String url = "https://payapp.weixin.qq.com/face/get_wxpayface_authinfo";
+    String responseContent = this.post(url, request.toXML(), false);
+    WxPayFaceAuthInfoResult result = BaseWxPayResult.fromXML(responseContent, WxPayFaceAuthInfoResult.class);
+    result.checkResult(this, request.getSignType(), true);
+    return result;
+  }
+
+  @Override
+  public WxPayFacepayResult facepay(WxPayFacepayRequest request) throws WxPayException {
+    request.checkAndSign(this.getConfig());
+
+    String url = this.getPayBaseUrl() + "/pay/facepay";
+    String responseContent = this.post(url, request.toXML(), false);
+    WxPayFacepayResult result = BaseWxPayResult.fromXML(responseContent, WxPayFacepayResult.class);
+    result.checkResult(this, request.getSignType(), true);
+    return result;
   }
 
 }

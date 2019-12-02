@@ -53,6 +53,7 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
   private WxMaShareService shareService = new WxMaShareServiceImpl(this);
   private WxMaRunService runService = new WxMaRunServiceImpl(this);
   private WxMaSecCheckService secCheckService = new WxMaSecCheckServiceImpl(this);
+  private WxMaPluginService pluginService = new WxMaPluginServiceImpl(this);
 
   private int retrySleepMillis = 1000;
   private int maxRetryTimes = 5;
@@ -118,13 +119,13 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
         }
         try (CloseableHttpResponse response = getRequestHttpClient().execute(httpGet)) {
           String resultContent = new BasicResponseHandler().handleResponse(response);
-          WxError error = WxError.fromJson(resultContent);
+          WxError error = WxError.fromJson(resultContent, WxType.MiniApp);
           if (error.getErrorCode() != 0) {
             throw new WxErrorException(error);
           }
           WxAccessToken accessToken = WxAccessToken.fromJson(resultContent);
           this.getWxMaConfig().updateAccessToken(accessToken.getAccessToken(), accessToken.getExpiresIn());
-          
+
           return this.getWxMaConfig().getAccessToken();
         } finally {
           httpGet.releaseConnection();
@@ -250,7 +251,7 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
     String uriWithAccessToken = uri + (uri.contains("?") ? "&" : "?") + "access_token=" + accessToken;
 
     try {
-      T result = executor.execute(uriWithAccessToken, data);
+      T result = executor.execute(uriWithAccessToken, data, WxType.MiniApp);
       log.debug("\n【请求地址】: {}\n【请求参数】：{}\n【响应数据】：{}", uriWithAccessToken, dataForLog, result);
       return result;
     } catch (WxErrorException e) {
@@ -358,5 +359,10 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
   @Override
   public WxMaSecCheckService getSecCheckService() {
     return this.secCheckService;
+  }
+
+  @Override
+  public WxMaPluginService getPluginService() {
+    return this.pluginService;
   }
 }
